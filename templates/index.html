@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f7f6">
+    <title>MediGuard | Pharmacy Console</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="MediGuard home">
+          <span class="brand-mark">M</span>
+          <span><strong>MediGuard</strong><small>PHARMACY CONTROL</small></span>
+        </a>
+        <div class="side-label">WORKSPACE</div>
+        <nav class="navigation" aria-label="Main navigation">
+          <button class="nav-link active" data-view="overview"><span>◫</span> Overview</button>
+          <button class="nav-link" data-view="inventory"><span>▤</span> Inventory</button>
+          <button class="nav-link" data-view="checkout"><span>⇄</span> FIFO checkout</button>
+          <button class="nav-link" data-view="reports"><span>▥</span> Reports</button>
+          <button class="nav-link" data-view="plans"><span>⌁</span> Query plans</button>
+          <button class="nav-link" data-view="qa"><span>✓</span> QA suite</button>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="side-label">DATABASE</div>
+          <div class="database-state"><span class="state-dot" id="connection-dot"></span><span id="connection-label">Checking connection</span></div>
+          <span class="db-caption" id="database-name">PostgreSQL</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="crumb"><span>Workspace</span><b>/</b><strong id="page-title">Overview</strong></div>
+          <div class="top-actions">
+            <span class="mode-badge hidden" id="mode-badge">SAMPLE DATA</span>
+            <label class="role-picker"><span>ACTIVE ROLE</span>
+              <select id="role-select" aria-label="Active database role">
+                <option value="pharmacist">Pharmacist</option>
+                <option value="auditor">Auditor</option>
+                <option value="admin">HR / Admin</option>
+              </select>
+            </label>
+            <button class="icon-button" id="refresh-button" title="Refresh dashboard" aria-label="Refresh dashboard">↻</button>
+            <div class="avatar" id="role-avatar">A</div>
+          </div>
+        </header>
+
+        <div class="content">
+          <section class="view active" id="view-overview">
+            <div class="welcome-row">
+              <div><div class="eyebrow">LOCAL PHARMACY · OPERATIONS</div><h1>Good day, <span id="greeting-role">Admin</span></h1><p class="muted">Your stock, expiry safety and checkout activity at a glance.</p></div>
+              <button class="button button-dark" data-go="checkout"><span>＋</span> New checkout</button>
+            </div>
+            <div class="metrics">
+              <article class="metric-card"><span class="metric-icon teal">▤</span><div class="metric-label">MEDICINES</div><strong id="metric-medicines">—</strong><span class="metric-foot">Unique catalog items</span></article>
+              <article class="metric-card"><span class="metric-icon blue">▣</span><div class="metric-label">BATCHES ON HAND</div><strong id="metric-batches">—</strong><span class="metric-foot"><span id="metric-units">—</span> total units</span></article>
+              <article class="metric-card"><span class="metric-icon amber">◷</span><div class="metric-label">LOCKED BATCHES</div><strong id="metric-locked">—</strong><span class="metric-foot">Expiry safety holds</span></article>
+              <article class="metric-card"><span class="metric-icon violet">↗</span><div class="metric-label">SALES TODAY</div><strong id="metric-sales">—</strong><span class="metric-foot">Completed transactions</span></article>
+            </div>
+            <div class="section-heading"><div><h2>Expiry & stock watch</h2><p class="muted">Nearest-expiry inventory batches</p></div><button class="text-button" data-go="inventory">View inventory <span>→</span></button></div>
+            <div class="table-wrap">
+              <table><thead><tr><th>BATCH</th><th>MEDICINE</th><th>EXPIRY</th><th>REMAINING</th><th>STATUS</th><th>ACCESS</th></tr></thead><tbody id="overview-batches"><tr><td colspan="6" class="empty">Loading stock ledger…</td></tr></tbody></table>
+            </div>
+            <div class="insight-strip"><span class="insight-mark">i</span><span><strong>30-day safety rule</strong><span id="expiry-rule-description">Batches expiring in 30 days or less are automatically locked by the database trigger and excluded from FIFO checkout.</span></span><button data-go="inventory">Inspect rule</button></div>
+          </section>
+
+          <section class="view" id="view-inventory">
+            <div class="page-heading"><div><div class="eyebrow">STOCK MANAGEMENT</div><h1>Inventory batches</h1><p class="muted" id="inventory-mode-info">Expiry classification and stock lock state are enforced by PostgreSQL.</p></div><button class="button button-outline" id="expiry-refresh">↻ Refresh expiry statuses</button></div>
+            <div class="panel" id="batch-create-panel">
+              <div class="panel-heading"><div><h2>Add a batch</h2><p id="batch-trigger-description">Database trigger classifies the new batch on insert.</p></div><span class="access-tag" data-action="admin">HR / Admin only</span></div>
+              <form id="batch-form" class="batch-form">
+                <label>Medicine<select name="medicine_id" id="batch-medicine" required></select></label>
+                <label>Supplier<select name="supplier_id" id="batch-supplier" required></select></label>
+                <label>Batch code<input name="batch_code" required maxlength="60" placeholder="e.g. AMX-2027-01"></label>
+                <label>Manufacture date<input name="manufacture_date" type="date" required></label>
+                <label>Expiry date<input name="expiry_date" type="date" required></label>
+                <label>Received quantity<input name="quantity_received" type="number" required value="20"></label>
+                <label>Current stock<input name="current_stock" type="number" required value="20"></label>
+                <button class="button button-dark" type="submit">Add batch <span>→</span></button>
+              </form>
+            </div>
+            <div class="section-heading compact"><div><h2>Batch ledger</h2><p class="muted">Click unlock to demonstrate the trigger guard.</p></div><span class="count-label" id="batch-count">0 batches</span></div>
+            <div class="table-wrap"><table><thead><tr><th>BATCH</th><th>MEDICINE / SUPPLIER</th><th>EXPIRY</th><th>STOCK</th><th>TRIGGER STATUS</th><th>LOCK</th><th></th></tr></thead><tbody id="batch-rows"><tr><td colspan="7" class="empty">Loading batch ledger…</td></tr></tbody></table></div>
+          </section>
+
+          <section class="view" id="view-checkout">
+            <div class="page-heading"><div><div class="eyebrow">POINT OF SALE</div><h1>FIFO checkout</h1><p class="muted" id="checkout-mode-info">Sellable batches are locked in expiry order before stock is deducted.</p></div><div class="fifo-chip"><span>↘</span> First expiry, first out</div></div>
+            <div class="checkout-grid">
+              <div class="panel">
+                <div class="panel-heading"><div><h2>Build a cart</h2><p>Only ACTIVE batches with more than 30 days remaining are available.</p></div></div>
+                <form id="checkout-form">
+                  <label class="form-label">Customer name<input id="customer-name" required placeholder="Customer name"></label>
+                  <div class="cart-header"><span>MEDICINE</span><span>AVAILABLE</span><span>QTY</span><span></span></div>
+                  <div id="cart-lines"></div>
+                  <button type="button" class="add-line" id="add-cart-line">＋ Add another medicine</button>
+                  <div class="checkout-total"><span>ESTIMATED TOTAL</span><strong id="estimated-total">₹0.00</strong></div>
+                  <button class="button button-dark checkout-submit" type="submit">Process FIFO checkout <span>→</span></button>
+                </form>
+              </div>
+              <aside class="panel checkout-aside"><div class="aside-icon">⇄</div><h2>Atomic by design</h2><p id="checkout-atomic-copy">Each checkout runs as one database transaction. If any cart line cannot be fulfilled, the safe procedure rolls back every stock deduction and sale row.</p><div class="mini-rule"><strong>Lock order</strong><code>expiry_date ASC<br>batch_id ASC</code></div><div class="mini-rule"><strong>Safety filter</strong><code>ACTIVE · unlocked<br>&gt; 30 days to expiry</code></div></aside>
+            </div>
+            <div id="checkout-result" class="result-panel hidden"></div>
+          </section>
+
+          <section class="view" id="view-reports">
+          <div class="page-heading"><div><div class="eyebrow">DECISION SUPPORT</div><h1>Operational reports</h1><p class="muted" id="report-mode-info">Live report queries against the PostgreSQL ledger.</p></div></div>
+            <div class="report-tabs">
+              <button class="report-tab active" data-report="A"><b>A</b><span><strong>Expiry & lock audit</strong><small>Value at risk by batch</small></span></button>
+              <button class="report-tab" data-report="B"><b>B</b><span><strong>Sellable FIFO stock</strong><small>Next dispensable expiry</small></span></button>
+              <button class="report-tab" data-report="C"><b>C</b><span><strong>Recent sales</strong><small>Batch traceability</small></span></button>
+            </div>
+            <div class="panel report-panel"><div class="panel-heading"><div><h2 id="report-title">Report A · Expiry & lock audit</h2><p id="report-description">30-day expiry exposure and inventory value at risk.</p></div><button class="button button-outline" id="run-report">Run report ↻</button></div><div class="table-wrap"><table><thead id="report-head"></thead><tbody id="report-rows"><tr><td class="empty">Run a report to load results.</td></tr></tbody></table></div></div>
+          </section>
+
+          <section class="view" id="view-plans">
+            <div class="page-heading"><div><div class="eyebrow">DATABASE PERFORMANCE</div><h1>Execution plans</h1><p class="muted">Compare buffer use with index paths disabled and with the normal query planner.</p></div><button class="button button-dark" id="run-plans">Run EXPLAIN <span>→</span></button></div>
+            <div class="plan-note"><strong>How to read this comparison</strong><span>The baseline disables index paths. The index demonstration disables sequential scans to expose available index paths. Compare with normal production plans before drawing performance conclusions.</span></div>
+            <div class="plan-grid"><article class="panel plan-card"><div class="plan-title"><span class="plan-dot gray"></span><div><h2>Sequential baseline</h2><small>Index paths disabled</small></div></div><pre id="baseline-plan">Run the comparison to inspect the analyzed plan.</pre></article><article class="panel plan-card"><div class="plan-title"><span class="plan-dot green"></span><div><h2>Index path comparison</h2><small>Sequential scans disabled</small></div></div><pre id="optimized-plan">Run the comparison to inspect the analyzed plan.</pre></article></div>
+            <div id="plan-summary" class="plan-summary hidden"></div>
+          </section>
+
+          <section class="view" id="view-qa">
+            <div class="page-heading"><div><div class="eyebrow">VERIFICATION</div><h1>Database QA suite</h1><p class="muted" id="qa-mode-description">Six checks demonstrate the trigger, FIFO, rollback and RBAC behavior.</p></div><button class="button button-dark" id="run-qa">Run all tests <span>→</span></button></div>
+            <div class="qa-banner"><span class="qa-banner-icon">✓</span><span><strong id="qa-safe-title">Safe to run</strong><small id="qa-safe-description">QA fixtures do not modify pharmacy records.</small></span><span id="qa-score" class="qa-score">NOT RUN</span></div>
+            <div id="qa-results" class="qa-list">
+              <article class="qa-row idle"><span class="qa-id">TC-01</span><span class="qa-state">—</span><div><strong>30-day safety boundary</strong><small>EXPIRING_SOON and automatically locked</small></div><span class="qa-detail">Waiting to run</span></article>
+              <article class="qa-row idle"><span class="qa-id">TC-02</span><span class="qa-state">—</span><div><strong>31-day sellable boundary</strong><small>ACTIVE and unlocked</small></div><span class="qa-detail">Waiting to run</span></article>
+              <article class="qa-row idle"><span class="qa-id">TC-03</span><span class="qa-state">—</span><div><strong>Blocked unsafe unlock</strong><small>Trigger rejects an unlock at the safety boundary</small></div><span class="qa-detail">Waiting to run</span></article>
+              <article class="qa-row idle"><span class="qa-id">TC-04</span><span class="qa-state">—</span><div><strong>Invalid shelf-life rejection</strong><small>Expiry date must be after manufacture date</small></div><span class="qa-detail">Waiting to run</span></article>
+              <article class="qa-row idle"><span class="qa-id">TC-05</span><span class="qa-state">—</span><div><strong>Multi-batch FIFO checkout</strong><small>Depletes the earliest eligible batch first</small></div><span class="qa-detail">Waiting to run</span></article>
+              <article class="qa-row idle"><span class="qa-id">TC-06</span><span class="qa-state">—</span><div><strong>Rollback & RBAC enforcement</strong><small>Oversell rolls back; auditor/pharmacist grants are checked</small></div><span class="qa-detail">Waiting to run</span></article>
+            </div>
+          </section>
+
+          <section class="sql-console" aria-label="SQL and error log">
+            <div class="console-heading"><div><span class="console-indicator"></span><strong>SQL & activity log</strong><small id="console-mode-label">LIVE DATABASE FEEDBACK</small></div><button id="clear-log">Clear</button></div>
+            <div id="activity-log" class="log-list"><div class="log-empty">Database actions and errors will appear here.</div></div>
+          </section>
+          <footer class="footer"><span>MediGuard · Smart Local Pharmacy</span><span id="footer-mode">PostgreSQL-backed operations console</span></footer>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -24,28 +24,28 @@ BEGIN
             NEW.current_stock, NEW.batch_code, NEW.quantity_received;
     END IF;
 
-    v_days_to_expiry := (NEW.expiry_date - CURRENT_DATE);
+    v_days_to_expiry := NEW.expiry_date - CURRENT_DATE;
+
+    IF TG_OP = 'UPDATE'
+       AND OLD.is_locked
+       AND NOT NEW.is_locked
+       AND v_days_to_expiry <= 30 THEN
+        RAISE EXCEPTION 'Lock violation on batch %: cannot unlock stock expiring in % days (<= 30-day rule)',
+            NEW.batch_code, v_days_to_expiry;
+    END IF;
 
     IF v_days_to_expiry < 0 THEN
         NEW.expiry_status := 'EXPIRED';
-        NEW.is_locked     := TRUE;
+        NEW.is_locked := TRUE;
     ELSIF v_days_to_expiry <= 30 THEN
         NEW.expiry_status := 'EXPIRING_SOON';
-        NEW.is_locked     := TRUE;
+        NEW.is_locked := TRUE;
     ELSE
         NEW.expiry_status := 'ACTIVE';
 
         IF TG_OP = 'UPDATE'
-           AND OLD.is_locked = TRUE
-           AND NEW.is_locked = FALSE
-           AND (OLD.expiry_date - CURRENT_DATE) <= 30 THEN
-            RAISE EXCEPTION 'Lock violation on batch %: cannot unlock stock expiring in % days (<= 30-day rule)',
-                NEW.batch_code, (OLD.expiry_date - CURRENT_DATE);
-        END IF;
-
-        IF TG_OP = 'UPDATE'
-           AND OLD.expiry_status IN ('EXPIRED', 'EXPIRING_SOON')
-           AND NEW.is_locked = OLD.is_locked THEN
+           AND OLD.is_locked
+           AND NEW.is_locked THEN
             NEW.is_locked := FALSE;
         END IF;
     END IF;
@@ -58,18 +58,17 @@ $$;
 DROP TRIGGER IF EXISTS trg_inventory_batches_expiry_guard ON inventory_batches;
 
 CREATE TRIGGER trg_inventory_batches_expiry_guard
-BEFORE INSERT OR UPDATE OF batch_code, manufacture_date, expiry_date, quantity_received, current_stock, is_locked
-ON inventory_batches
+BEFORE INSERT OR UPDATE ON inventory_batches
 FOR EACH ROW
 EXECUTE FUNCTION fn_evaluate_batch_expiry_and_lock();
 
 CREATE OR REPLACE PROCEDURE sp_refresh_all_batch_expiry_statuses()
 LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
     UPDATE inventory_batches
-    SET updated_at = CURRENT_TIMESTAMP
-    WHERE current_stock > 0
-       OR expiry_status <> 'EXPIRED';
+    SET updated_at = CURRENT_TIMESTAMP;
 END;
 $$;
