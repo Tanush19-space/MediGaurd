@@ -1,17 +1,6 @@
-**File Path:** `sql/04_reports_indexes_and_explain.sql`
-
-```sql
--- ============================================================================
--- MEMBER 4: REPORTING QUERIES, INDEXES & EXECUTION PLAN VERIFICATION
--- File: sql/04_reports_indexes_and_explain.sql
--- Target DBMS: PostgreSQL
--- ============================================================================
-
--- 1. Indexes supporting expiry audits, FIFO stock lookups, and sales reporting
-`
 CREATE INDEX IF NOT EXISTS idx_batches_fifo_lookup
     ON inventory_batches (medicine_id, expiry_date ASC, batch_id ASC)
-    WHERE current_stock > 0 AND is_locked = FALSE AND expiry_status <> 'EXPIRED';
+    WHERE current_stock > 0 AND is_locked = FALSE AND expiry_status = 'ACTIVE';
 
 CREATE INDEX IF NOT EXISTS idx_batches_expiry_stock
     ON inventory_batches (expiry_date ASC, current_stock)
@@ -19,7 +8,7 @@ CREATE INDEX IF NOT EXISTS idx_batches_expiry_stock
 
 CREATE INDEX IF NOT EXISTS idx_batches_sellable_fifo_cover
     ON inventory_batches (medicine_id, expiry_date ASC)
-    INCLUDE (current_stock)
+    INCLUDE (batch_id, current_stock)
     WHERE current_stock > 0 AND is_locked = FALSE AND expiry_status = 'ACTIVE';
 
 CREATE INDEX IF NOT EXISTS idx_sales_transactions_sale_date
@@ -33,7 +22,7 @@ ANALYZE inventory_batches;
 ANALYZE sales_transactions;
 ANALYZE sale_items;
 
--- 2. Report A: Batch Expiry & Lock Audit Report
+-- Report A: 30-day expiry and lock audit with the inventory value at risk.
 SELECT
     ib.batch_id,
     ib.batch_code,
@@ -43,7 +32,7 @@ SELECT
     s.supplier_name,
     ib.manufacture_date,
     ib.expiry_date,
-    (ib.expiry_date - CURRENT_DATE) AS days_to_expiry,
+    ib.expiry_date - CURRENT_DATE AS days_to_expiry,
     ib.expiry_status,
     ib.is_locked,
     ib.current_stock,
@@ -53,13 +42,10 @@ FROM inventory_batches ib
 JOIN medicines m ON m.medicine_id = ib.medicine_id
 JOIN suppliers s ON s.supplier_id = ib.supplier_id
 WHERE ib.current_stock > 0
-  AND (
-      ib.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
-      OR ib.is_locked = TRUE
-  )
-ORDER BY ib.expiry_date ASC, stock_value_at_risk DESC;
+  AND (ib.expiry_date <= CURRENT_DATE + 30 OR ib.is_locked)
+ORDER BY ib.expiry_date, stock_value_at_risk DESC;
 
--- 3. Report B: Sellable FIFO Stock Summary by Medicine
+-- Report B: sellable inventory, excluding batches at or inside the safety lock.
 SELECT
     m.medicine_id,
     m.medicine_name,
@@ -74,11 +60,11 @@ LEFT JOIN inventory_batches ib
    AND ib.current_stock > 0
    AND ib.is_locked = FALSE
    AND ib.expiry_status = 'ACTIVE'
-   AND (ib.expiry_date - CURRENT_DATE) > 30
+   AND ib.expiry_date - CURRENT_DATE > 30
 GROUP BY m.medicine_id, m.medicine_name, m.category, m.unit_price
-ORDER BY m.medicine_name ASC;
+ORDER BY m.medicine_name;
 
--- 4. Report C: Recent Sales & Batch Traceability Report
+-- Report C: recent sales with batch and supplier traceability.
 SELECT
     st.sale_id,
     st.sale_date::DATE AS sale_day,
@@ -96,25 +82,29 @@ JOIN sale_items si ON si.sale_id = st.sale_id
 JOIN inventory_batches ib ON ib.batch_id = si.batch_id
 JOIN medicines m ON m.medicine_id = ib.medicine_id
 JOIN suppliers s ON s.supplier_id = ib.supplier_id
-WHERE st.sale_date >= CURRENT_DATE - INTERVAL '30 days'
-ORDER BY st.sale_date DESC, st.sale_id DESC, si.item_id ASC;
+WHERE st.sale_date >= CURRENT_DATE - 30
+ORDER BY st.sale_date DESC, st.sale_id DESC, si.item_id;
 
--- 5. Execution Plan Check for Report A
+-- Compare a sequential baseline with the normal planner. Small datasets may
+-- still favor sequential scans even after indexes are available.
+BEGIN;
+SET LOCAL enable_indexscan = OFF;
+SET LOCAL enable_indexonlyscan = OFF;
+SET LOCAL enable_bitmapscan = OFF;
 EXPLAIN (ANALYZE, BUFFERS)
-SELECT
-    ib.batch_id,
-    ib.batch_code,
-    m.medicine_name,
-    s.supplier_name,
-    ib.expiry_date,
-    ib.current_stock,
-    ROUND(ib.current_stock * m.unit_price, 2) AS stock_value_at_risk
-FROM inventory_batches ib
-JOIN medicines m ON m.medicine_id = ib.medicine_id
-JOIN suppliers s ON s.supplier_id = ib.supplier_id
-WHERE ib.current_stock > 0
-  AND (
-      ib.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
-      OR ib.is_locked = TRUE
-  )
-ORDER BY ib.expiry_date ASC, stock_value_at_risk DESC;
+SELECT batch_id, batch_code, expiry_date, current_stock
+FROM inventory_batches
+WHERE current_stock > 0
+  AND (expiry_date <= CURRENT_DATE + 30 OR is_locked)
+ORDER BY expiry_date;
+
+SET LOCAL enable_indexscan = ON;
+SET LOCAL enable_indexonlyscan = ON;
+SET LOCAL enable_bitmapscan = ON;
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT batch_id, batch_code, expiry_date, current_stock
+FROM inventory_batches
+WHERE current_stock > 0
+  AND (expiry_date <= CURRENT_DATE + 30 OR is_locked)
+ORDER BY expiry_date;
+ROLLBACK;
