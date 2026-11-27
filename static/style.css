@@ -39,6 +39,7 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .database-state { display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 11px; font-weight: 600; }
 .state-dot { width: 7px; height: 7px; border-radius: 50%; background: #dfa94c; box-shadow: 0 0 0 3px #dfa94c22; }
 .state-dot.online { background: #37a477; box-shadow: 0 0 0 3px #37a47720; }
+.state-dot.preview { background: #dfa94c; box-shadow: 0 0 0 3px #dfa94c22; }
 .db-caption { display: block; padding: 6px 25px; color: #98a39f; font: 10px "DM Mono", monospace; }
 .main { min-width: 0; }
 .topbar { height: 67px; background: rgba(255,255,255,.82); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; padding: 0 34px; position: sticky; top: 0; z-index: 4; backdrop-filter: blur(12px); }
@@ -48,6 +49,7 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .top-actions { display: flex; align-items: center; gap: 14px; }
 .role-picker { display: flex; align-items: center; gap: 9px; color: #99a49f; font: 9px "DM Mono", monospace; letter-spacing: .75px; }
 .role-picker select { appearance: none; padding: 8px 28px 8px 11px; border: 1px solid #e1e9e5; border-radius: 7px; color: var(--ink); font: 600 11px "DM Sans", sans-serif; outline: none; background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='m2 3.5 3 3 3-3' fill='none' stroke='%23748180' stroke-width='1.3'/%3E%3C/svg%3E") right 10px center no-repeat; }
+.mode-badge { border: 1px solid #f1d59d; border-radius: 5px; background: #fff5df; color: #96651d; padding: 6px 8px; font: 500 8px "DM Mono", monospace; letter-spacing: .35px; white-space: nowrap; }
 .icon-button { background: white; border: 1px solid var(--line); color: #697773; border-radius: 7px; width: 31px; height: 31px; font-size: 18px; }
 .avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #e5f1ed; color: var(--teal-dark); font-size: 11px; font-weight: 700; }
 .content { max-width: 1500px; margin: auto; padding: 32px 36px 22px; }

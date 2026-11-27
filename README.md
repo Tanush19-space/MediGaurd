@@ -46,11 +46,13 @@ The role selector is an educational role switcher, not user authentication. In a
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r .\requirements.txt
-$env:MEDIGUARD_DATABASE_URL = "postgresql://mediguard_app:password@localhost:5432/mediguard"
+$env:MEDIGUARD_DATABASE_URL = "postgresql://mediguard_app:kunal@localhost:5432/mediguard"
 python .\app.py
 ```
 
-Open <http://127.0.0.1:5000>. Without `MEDIGUARD_DATABASE_URL`, the interface still loads and reports the connection/configuration error in its live log.
+Open <http://127.0.0.1:5000>. With no `MEDIGUARD_DATABASE_URL`, the console starts in **Demo mode** with sample data, simulated checkout/reports/query plans, and the six visual QA results. Demo activity is clearly labeled and does not execute SQL or modify a database. The sample inventory and sales reset when the server restarts.
+
+To explicitly select a mode, set `MEDIGUARD_DEMO_MODE=1` for the demo or `MEDIGUARD_DEMO_MODE=0` with `MEDIGUARD_DATABASE_URL` set for live PostgreSQL. If the mode variable is omitted, the app uses demo mode when no database URL is configured and live mode when a URL is configured.
 
 ## QA and reports
 

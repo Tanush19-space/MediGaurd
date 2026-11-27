@@ -8,6 +8,8 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from demo import DemoError, demo_store
+
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -77,6 +79,13 @@ class RollbackQA(Exception):
     pass
 
 
+def demo_mode():
+    configured = os.environ.get("MEDIGUARD_DEMO_MODE")
+    if configured is not None:
+        return configured.strip().lower() in ("1", "true", "yes", "on")
+    return not bool(os.environ.get("MEDIGUARD_DATABASE_URL"))
+
+
 def active_role():
     role = request.headers.get("X-MediGuard-Role", "pharmacist")
     if role not in ROLES:
@@ -124,6 +133,19 @@ def handle_database_configuration(error):
     return jsonify(error=str(error)), 503
 
 
+@app.errorhandler(DemoError)
+def handle_demo_error(error):
+    return (
+        jsonify(
+            error=str(error),
+            detail=str(error),
+            sql=getattr(g, "sql_statement", None),
+            demo=True,
+        ),
+        error.status_code,
+    )
+
+
 @app.errorhandler(psycopg.Error)
 def handle_database_error(error):
     message = error.diag.message_primary if error.diag and error.diag.message_primary else str(error)
@@ -148,6 +170,8 @@ def health():
     role = active_role()
     if role is None:
         return jsonify(error="Unknown RBAC role."), 400
+    if demo_mode():
+        return jsonify(demo_store.health())
     try:
         with database(role) as conn:
             row = conn.execute(
@@ -164,6 +188,8 @@ def overview():
     role = active_role()
     if role is None:
         return jsonify(error="Unknown RBAC role."), 400
+    if demo_mode():
+        return jsonify(demo=True, **demo_store.overview())
     with database(role) as conn:
         metrics = conn.execute(
             """
@@ -196,6 +222,8 @@ def catalog():
     role = active_role()
     if role is None:
         return jsonify(error="Unknown RBAC role."), 400
+    if demo_mode():
+        return jsonify(demo=True, **demo_store.catalog())
     with database(role) as conn:
         rows = conn.execute(
             """
@@ -214,6 +242,8 @@ def supplier_catalog():
     role = active_role()
     if role is None:
         return jsonify(error="Unknown RBAC role."), 400
+    if demo_mode():
+        return jsonify(demo=True, **demo_store.suppliers_list())
     with database(role) as conn:
         rows = conn.execute(
             "SELECT supplier_id, supplier_name FROM suppliers ORDER BY supplier_name"
@@ -226,6 +256,8 @@ def batches():
     role = active_role()
     if role is None:
         return jsonify(error="Unknown RBAC role."), 400
+    if demo_mode():
+        return jsonify(demo=True, **demo_store.batches_list())
     with database(role) as conn:
         rows = conn.execute(
             """
@@ -262,6 +294,13 @@ def add_batch():
         return jsonify(error="Complete every batch field before saving."), 400
 
     g.sql_statement = "INSERT INTO inventory_batches (...) VALUES (...)"
+    if demo_mode():
+        return jsonify(
+            demo=True,
+            batch=demo_store.add_batch(data)["batch"],
+            sql="SIMULATED: INSERT INTO inventory_batches (...) VALUES (...)",
+            message="Demo batch added; no database was changed.",
+        ), 201
     with database(role) as conn:
         row = conn.execute(
             """
@@ -282,6 +321,13 @@ def unlock_batch(batch_id):
     if denied:
         return denied
     g.sql_statement = "UPDATE inventory_batches SET is_locked = FALSE WHERE batch_id = %s"
+    if demo_mode():
+        result = demo_store.unlock(batch_id)
+        return jsonify(
+            demo=True,
+            **result,
+            sql="SIMULATED: UPDATE inventory_batches SET is_locked = FALSE WHERE batch_id = %s",
+        )
     with database(role) as conn:
         row = conn.execute(
             """
@@ -311,6 +357,22 @@ def checkout():
         return jsonify(error="Add at least one item to the cart."), 400
 
     g.sql_statement = "CALL sp_safe_fifo_checkout(customer, items, ...)"
+    if demo_mode():
+        try:
+            result = demo_store.checkout(customer_name, items)
+        except DemoError as error:
+            return jsonify(
+                error=str(error),
+                sql="SIMULATED: CALL sp_safe_fifo_checkout(customer, items, ...)",
+                transaction="ROLLED_BACK",
+                demo=True,
+            ), 409
+        return jsonify(
+            **result,
+            demo=True,
+            sql="SIMULATED: CALL sp_safe_fifo_checkout(customer, items, ...)",
+            transaction="COMMITTED",
+        )
     with database(role) as conn:
         result = conn.execute(
             "CALL sp_safe_fifo_checkout(%s, %s, NULL, NULL, NULL)",
@@ -353,6 +415,12 @@ def refresh_expiry():
     if denied:
         return denied
     g.sql_statement = "CALL sp_refresh_all_batch_expiry_statuses()"
+    if demo_mode():
+        return jsonify(
+            demo=True,
+            **demo_store.refresh_expiry(),
+            sql="SIMULATED: CALL sp_refresh_all_batch_expiry_statuses()",
+        )
     with database(role) as conn:
         conn.execute("CALL sp_refresh_all_batch_expiry_statuses()")
         count = conn.execute("SELECT COUNT(*) AS refreshed FROM inventory_batches").fetchone()["refreshed"]
@@ -368,6 +436,13 @@ def report(report_id):
     if query is None:
         return jsonify(error="Choose Report A, B, or C."), 404
     g.sql_statement = query.strip()
+    if demo_mode():
+        return jsonify(
+            demo=True,
+            report=report_id.upper(),
+            rows=demo_store.report(report_id.upper()),
+            sql="SIMULATED REPORT QUERY — no SQL executed.",
+        )
     with database(role) as conn:
         rows = conn.execute(query).fetchall()
     return jsonify(report=report_id.upper(), rows=rows, sql=query.strip())
@@ -379,6 +454,12 @@ def plans():
     if role is None:
         return jsonify(error="Unknown RBAC role."), 400
     g.sql_statement = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + PLAN_QUERY.strip()
+    if demo_mode():
+        return jsonify(
+            demo=True,
+            **demo_store.plans(),
+            sql="SIMULATED EXPLAIN — sample plan; no database was queried.",
+        )
     with database(role) as conn:
         conn.execute("SET LOCAL enable_indexscan = OFF")
         conn.execute("SET LOCAL enable_indexonlyscan = OFF")
@@ -407,6 +488,8 @@ def run_qa():
     if denied:
         return denied
     g.sql_statement = "QA fixture transaction: seed, TC-01 through TC-06, ROLLBACK"
+    if demo_mode():
+        return jsonify(demo=True, **demo_store.qa())
     token = uuid.uuid4().hex[:12].upper()
     steps = []
 

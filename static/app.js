@@ -9,6 +9,7 @@ const reportDefinitions = {
 
 let activeReport = "A";
 let catalog = [];
+let previewDataActive = false;
 
 function role() {
   return roleSelect.value;
@@ -23,7 +24,7 @@ function addLog(title, status, detail, sqlText = "") {
   const heading = document.createElement("div");
   heading.className = "log-entry-heading";
   const titleNode = document.createElement("strong");
-  titleNode.textContent = title;
+  titleNode.textContent = previewDataActive ? `Sample data · ${title}` : title;
   const state = document.createElement("span");
   state.className = "log-status";
   state.textContent = status.toUpperCase();
@@ -38,7 +39,9 @@ function addLog(title, status, detail, sqlText = "") {
   }
   if (sqlText) {
     const code = document.createElement("code");
-    code.textContent = sqlText;
+    code.textContent = previewDataActive
+      ? `-- PREVIEW ONLY: illustrative SQL; not executed against PostgreSQL.\n${sqlText}`
+      : sqlText;
     entry.append(code);
   }
   logList.prepend(entry);
@@ -54,6 +57,7 @@ async function api(path, options = {}) {
     },
   });
   const body = await response.json();
+  if (body.demo === true) previewDataActive = true;
   if (!response.ok) {
     const error = new Error(body.error || `Request failed (${response.status})`);
     error.body = body;
@@ -68,10 +72,42 @@ function showError(title, error) {
   if (error.status === 403) addLog("RBAC policy", "blocked", error.message);
 }
 
-function setConnection(connected, label) {
+function setConnection(connected, label, preview = false) {
+  previewDataActive = preview;
   document.querySelector("#connection-dot").classList.toggle("online", connected);
-  document.querySelector("#connection-label").textContent = connected ? "Connected" : "Database offline";
-  document.querySelector("#database-name").textContent = label || (connected ? "PostgreSQL" : "Set MEDIGUARD_DATABASE_URL");
+  document.querySelector("#connection-dot").classList.toggle("preview", preview);
+  document.querySelector("#connection-label").textContent = preview ? "Sample data" : connected ? "Connected" : "Database offline";
+  document.querySelector("#database-name").textContent = preview ? "PREVIEW DATASET" : label || (connected ? "PostgreSQL" : "Set MEDIGUARD_DATABASE_URL");
+  document.querySelector("#mode-badge").classList.toggle("hidden", !preview);
+  document.querySelector("#console-mode-label").textContent = preview ? "PREVIEW · NO DATABASE" : "LIVE DATABASE FEEDBACK";
+  document.querySelector("#qa-mode-description").textContent = preview
+    ? "Six preview checks illustrate expiry, FIFO, rollback and role-policy scenarios."
+    : "Six live checks. Fixtures run in a transaction and are rolled back when complete.";
+  document.querySelector("#qa-safe-title").textContent = preview ? "Preview results" : "Safe to run";
+  document.querySelector("#qa-safe-description").textContent = preview
+    ? "These results are illustrative; no database rows are created, changed or rolled back."
+    : "QA data and successful checkout changes are rolled back; existing pharmacy records are left unchanged.";
+  document.querySelector("#expiry-rule-description").textContent = preview
+    ? "Sample batches show the intended 30-day lock and FIFO exclusion behavior."
+    : " Batches expiring in 30 days or less are automatically locked by the database trigger and excluded from FIFO checkout.";
+  document.querySelector("#inventory-mode-info").textContent = preview
+    ? "Sample inventory illustrates expiry classification and stock lock behavior."
+    : "Expiry classification and stock lock state are enforced by PostgreSQL.";
+  document.querySelector("#batch-trigger-description").textContent = preview
+    ? "The sample inventory applies the intended expiry rule when a batch is added."
+    : "Database trigger classifies the new batch on insert.";
+  document.querySelector("#checkout-mode-info").textContent = preview
+    ? "Sample checkout applies FIFO to eligible inventory; no database is changed."
+    : "Sellable batches are locked in expiry order before stock is deducted.";
+  document.querySelector("#checkout-atomic-copy").textContent = preview
+    ? "Preview checkout models atomic stock movement. An insufficient cart leaves sample stock unchanged; no database rows are written."
+    : "Each checkout runs as one database transaction. If any cart line cannot be fulfilled, the safe procedure rolls back every stock deduction and sale row.";
+  document.querySelector("#report-mode-info").textContent = preview
+    ? "Reports are calculated from the sample pharmacy dataset."
+    : "Live report queries against the PostgreSQL ledger.";
+  document.querySelector("#footer-mode").textContent = preview
+    ? "Sample dataset · preview only"
+    : "PostgreSQL-backed operations console";
 }
 
 function fmt(value) {
@@ -85,8 +121,16 @@ function money(value) {
 }
 
 function bufferCount(plan) {
-  const root = plan?.Plan || {};
-  return Number(root["Shared Hit Blocks"] || 0) + Number(root["Shared Read Blocks"] || 0);
+  const result = Array.isArray(plan) ? plan[0] : plan;
+  const root = result?.Plan || {};
+  const planning = result?.Planning || {};
+  const execution = result?.Execution || {};
+  return Number(root["Shared Hit Blocks"] || 0)
+    + Number(root["Shared Read Blocks"] || 0)
+    + Number(planning["Shared Hit Blocks"] || 0)
+    + Number(planning["Shared Read Blocks"] || 0)
+    + Number(execution["Shared Hit Blocks"] || 0)
+    + Number(execution["Shared Read Blocks"] || 0);
 }
 
 function badge(status, locked) {
@@ -153,7 +197,7 @@ function escapeHtml(value) {
 async function loadOverview() {
   try {
     const [health, data] = await Promise.all([api("/api/health"), api("/api/overview")]);
-    setConnection(health.connected, health.database);
+    setConnection(health.connected, health.database, health.demo === true);
     renderOverview(data);
   } catch (error) {
     setConnection(false);
@@ -284,10 +328,17 @@ async function submitCheckout(event) {
       method: "POST",
       body: JSON.stringify({ customer_name: document.querySelector("#customer-name").value, items }),
     });
-    addLog(`Sale #${result.sale_id} committed`, "success", `FIFO checkout total ${money(result.total)}.`, result.sql);
+    addLog(
+      previewDataActive ? `Sale #${result.sale_id} previewed` : `Sale #${result.sale_id} committed`,
+      "success",
+      previewDataActive
+        ? `Sample FIFO checkout total ${money(result.total)}; no database was changed.`
+        : `FIFO checkout total ${money(result.total)}.`,
+      result.sql,
+    );
     const box = document.querySelector("#checkout-result");
     box.classList.remove("hidden", "error-result");
-    box.innerHTML = `<strong>Sale #${result.sale_id} committed · ${money(result.total)}</strong>${result.items.map((item) => `<div>${escapeHtml(item.medicine_name)} · ${escapeHtml(item.batch_code)} · ${item.quantity_sold} units · ${money(item.subtotal)}</div>`).join("")}`;
+    box.innerHTML = `<strong>${previewDataActive ? "Sample sale" : "Sale"} #${result.sale_id} ${previewDataActive ? "preview" : "committed"} · ${money(result.total)}</strong>${result.items.map((item) => `<div>${escapeHtml(item.medicine_name)} · ${escapeHtml(item.batch_code)} · ${item.quantity_sold} units · ${money(item.subtotal)}</div>`).join("")}`;
     await loadCatalog();
     loadOverview();
   } catch (error) {
@@ -295,7 +346,9 @@ async function submitCheckout(event) {
     const box = document.querySelector("#checkout-result");
     box.classList.remove("hidden");
     box.classList.add("error-result");
-    box.textContent = `${error.message} No sale or stock deduction was committed.`;
+    box.textContent = previewDataActive
+      ? `${error.message} Sample stock remains unchanged.`
+      : `${error.message} No sale or stock deduction was committed.`;
   }
 }
 
@@ -327,7 +380,9 @@ async function runQA() {
     const result = await api("/api/qa", { method: "POST", body: "{}" });
     result.steps.forEach((step) => addLog(step.id, step.passed ? "success" : "error", `${step.title}: ${step.detail}`));
     const score = document.querySelector("#qa-score");
-    score.textContent = `${result.passed}/${result.total} PASSED · ROLLED BACK`;
+    score.textContent = previewDataActive
+      ? `${result.passed}/${result.total} PASSED · PREVIEW ONLY`
+      : `${result.passed}/${result.total} PASSED · ROLLED BACK`;
     score.classList.toggle("failed", result.passed !== result.total);
     document.querySelectorAll(".qa-row").forEach((row, index) => {
       const step = result.steps[index];
@@ -349,7 +404,9 @@ document.querySelectorAll("[data-go]").forEach((button) => button.addEventListen
 document.querySelector("#role-select").addEventListener("change", () => {
   localStorage.setItem("mediguard-role", role());
   updateRoleUI();
-  addLog("Active role switched", "info", `Console role set to ${roleLabels[role()]}. Database actions will run under this PostgreSQL role.`);
+  addLog("Active role switched", "info", previewDataActive
+    ? `Console role set to ${roleLabels[role()]}. Sample actions use preview role permissions.`
+    : `Console role set to ${roleLabels[role()]}. Database actions will run under this PostgreSQL role.`);
   loadOverview();
   if (document.querySelector("#view-inventory").classList.contains("active")) loadBatches();
   if (document.querySelector("#view-checkout").classList.contains("active")) loadCatalog();
